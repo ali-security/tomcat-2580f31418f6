@@ -63,6 +63,7 @@ public class SecureNioChannel extends NioChannel {
     protected boolean sniComplete = false;
 
     protected boolean handshakeComplete = false;
+    protected boolean needHandshakeWrap = false;
     protected HandshakeStatus handshakeStatus; //gets set by handshake
 
     protected boolean closed = false;
@@ -93,6 +94,7 @@ public class SecureNioChannel extends NioChannel {
         sslEngine = null;
         sniComplete = false;
         handshakeComplete = false;
+        needHandshakeWrap = false;
         closed = false;
         closing = false;
         netInBuffer.clear();
@@ -624,6 +626,14 @@ public class SecureNioChannel extends NioChannel {
                 //perform any tasks if needed
                 if (unwrap.getHandshakeStatus() == HandshakeStatus.NEED_TASK) {
                     tasks();
+                } else if (unwrap.getHandshakeStatus() == HandshakeStatus.NEED_WRAP) {
+                    if (getOutboundRemaining() == 0) {
+                        handshakeWrap(true);
+                    } else if (needHandshakeWrap) {
+                        throw new IOException(sm.getString("channel.nio.ssl.handshakeWrapPending"));
+                    } else {
+                        needHandshakeWrap = true;
+                    }
                 }
                 //if we need more network data, then bail out for now.
                 if (unwrap.getStatus() == Status.BUFFER_UNDERFLOW) {
@@ -705,6 +715,14 @@ public class SecureNioChannel extends NioChannel {
                 //perform any tasks if needed
                 if (unwrap.getHandshakeStatus() == HandshakeStatus.NEED_TASK) {
                     tasks();
+                } else if (unwrap.getHandshakeStatus() == HandshakeStatus.NEED_WRAP) {
+                    if (getOutboundRemaining() == 0) {
+                        handshakeWrap(true);
+                    } else if (needHandshakeWrap) {
+                        throw new IOException(sm.getString("channel.nio.ssl.handshakeWrapPending"));
+                    } else {
+                        needHandshakeWrap = true;
+                    }
                 }
                 //if we need more network data, then bail out for now.
                 if (unwrap.getStatus() == Status.BUFFER_UNDERFLOW) {
@@ -800,6 +818,8 @@ public class SecureNioChannel extends NioChannel {
             netOutBuffer.clear();
 
             SSLEngineResult result = sslEngine.wrap(src, netOutBuffer);
+            // Call to wrap() will have included any required handshake data
+            needHandshakeWrap = false;
             // The number of bytes written
             int written = result.bytesConsumed();
             netOutBuffer.flip();
@@ -837,6 +857,8 @@ public class SecureNioChannel extends NioChannel {
         netOutBuffer.clear();
 
         SSLEngineResult result = sslEngine.wrap(srcs, offset, length, netOutBuffer);
+        // Call to wrap() will have included any required handshake data
+        needHandshakeWrap = false;
         // The number of bytes written
         int written = result.bytesConsumed();
         netOutBuffer.flip();
